@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="PublishConfigData" autoUpload="On explicit save action" serverName="lab403" createEmptyFolders="true" uploadOnCheckin="9417ebad-0209-49c3-bb6e-6b16a14e337b">
+    <serverData>
+      <paths name="lab403">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/git/ICPR_MTWI_lab403" local="$PROJECT_DIR$" web="/git/ICPR_MTWI_lab403" />
+          </mappings>
+        </serverdata>
+      </paths>
+    </serverData>
+    <option name="myUploadOnCheckinName" value="lab403" />
+    <option name="myAutoUpload" value="ON_EXPLICIT_SAVE" />
+  </component>
+</project>
