@@ -55,6 +55,7 @@ class icpr_dataset(Dataset):
                         box[i] = h-1
 
         truth = torch.tensor(truth, dtype=float)
+        data={}
         data["image"] = img
         data["truth"] = truth
         return data,img_path,txt_path
