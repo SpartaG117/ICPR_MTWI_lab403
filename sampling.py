@@ -2,7 +2,7 @@ import torch
 import itertools
 
 
-def Sampling(corners, corner_type, ss_threshold = 5, width, height):
+def Sampling(corners, corner_type, ss_threshold = 5, width=300, height=300):
     """
     :param corners: [batch_size, corner_id, coordinates(x,y,ss,ss)]
     :param corner_type: [batch_size, corner_id, corner_type]
@@ -48,6 +48,7 @@ def Sampling(corners, corner_type, ss_threshold = 5, width, height):
             pairs_4.appned(pair)
 
         boxes=[]
+
         for pair in pairs_1:
             top_l, top_r = pair
             if top_l[2] > top_r[2]:
@@ -66,7 +67,7 @@ def Sampling(corners, corner_type, ss_threshold = 5, width, height):
             # construct rotated rectangle
             unit_v = torch.tensor([1,0],dtype=torch.float)
             v = top_r[0:2] - top_l[0:2]
-            cos = torch.sum(v * unit_v) / v.pow(2).sum().sqrt() / unit_v.pow(2).sum().sqrt()
+            cos = torch.sum(v * unit_v) / v.pow(2).sum().sqrt()
             sin = (1 - cos.pow(2)).sqrt()
             rotate_mat = torch.tensor([[cos, sin],[-sin, cos]])
             top_l_r = torch.matmul(top_l,rotate_mat)
@@ -76,15 +77,16 @@ def Sampling(corners, corner_type, ss_threshold = 5, width, height):
             bottom_l = torch.matmul(top_l_r,rotate_mat.inverse())
             bottom_r = torch.matmul(top_r_r,rotate_mat.inverse())
 
-            # TODO: inspect corners out of bounds
-
             box =[top_l[0], top_l[1], bottom_l[0], bottom_l[1],
                   bottom_r[0], bottom_r[1], top_r[0], top_r[1]]
 
             # TODO: adjust algorithm
+            flag = 0
             for coord in box:
                 if coord > width or coord > height or coord < 0:
-                    continue
+                    flag = 1
+            if flag == 1:
+                continue
             boxes.append(box)
 
         for pair in pairs_2:
@@ -105,7 +107,7 @@ def Sampling(corners, corner_type, ss_threshold = 5, width, height):
             # construct rotated rectangle
             unit_v = torch.tensor([0,1],dtype=torch.float)
             v = bottom_r[0:2] - top_r[0:2]
-            cos = torch.sum(v * unit_v) / v.pow(2).sum().sqrt() / unit_v.pow(2).sum().sqrt()
+            cos = torch.sum(v * unit_v) / v.pow(2).sum().sqrt()
             sin = (1 - cos.pow(2)).sqrt()
             rotate_mat = torch.tensor([[cos, sin],[-sin, cos]])
             bottom_r_r = torch.matmul(bottom_r,rotate_mat)
@@ -115,15 +117,16 @@ def Sampling(corners, corner_type, ss_threshold = 5, width, height):
             bottom_l = torch.matmul(bottom_r_r,rotate_mat.inverse())
             top_l = torch.matmul(top_r_r,rotate_mat.inverse())
 
-            #TODO: inspect corners out of bounds
-
             box =[top_l[0], top_l[1], bottom_l[0], bottom_l[1],
                   bottom_r[0], bottom_r[1], top_r[0], top_r[1]]
 
             # TODO: adjust algorithm
+            flag = 0
             for coord in box:
                 if coord > width or coord > height or coord < 0:
-                    continue
+                    flag = 1
+            if flag == 1:
+                continue
             boxes.append(box)
 
         for pair in pairs_3:
@@ -144,15 +147,15 @@ def Sampling(corners, corner_type, ss_threshold = 5, width, height):
             # construct rotated rectangle
             unit_v = torch.tensor([1,0],dtype=torch.float)
             v = bottom_r[0:2] - bottom_l[0:2]
-            cos = torch.sum(v * unit_v) / v.pow(2).sum().sqrt() / unit_v.pow(2).sum().sqrt()
+            cos = torch.sum(v * unit_v) / v.pow(2).sum().sqrt()
             sin = (1 - cos.pow(2)).sqrt()
             rotate_mat = torch.tensor([[cos, sin],[-sin, cos]])
             bottom_l_r = torch.matmul(bottom_l,rotate_mat)
             bottom_r_r = torch.matmul(bottom_r,rotate_mat)
             bottom_l_r[1] -= ss_min
             bottom_r_r[1] -= ss_min
-            top_l = torch.matmul(top_l_r,rotate_mat.inverse())
-            top_r = torch.matmul(top_r_r,rotate_mat.inverse())
+            top_l = torch.matmul(bottom_l_r,rotate_mat.inverse())
+            top_r = torch.matmul(bottom_r_r,rotate_mat.inverse())
 
             #TODO: inspect corners out of bounds
 
@@ -160,9 +163,12 @@ def Sampling(corners, corner_type, ss_threshold = 5, width, height):
                   bottom_r[0], bottom_r[1], top_r[0], top_r[1]]
 
             # TODO: adjust algorithm
+            flag = 0
             for coord in box:
                 if coord > width or coord > height or coord < 0:
-                    continue
+                    flag = 1
+            if flag == 1:
+                continue
             boxes.append(box)
 
         for pair in pairs_4:
@@ -199,10 +205,14 @@ def Sampling(corners, corner_type, ss_threshold = 5, width, height):
                   bottom_r[0], bottom_r[1], top_r[0], top_r[1]]
 
             # TODO: adjust algorithm
+            flag = 0
             for coord in box:
                 if coord > width or coord > height or coord < 0:
-                    continue
+                    flag = 1
+            if flag == 1:
+                continue
             boxes.append(box)
+
         candidates.append(boxes)
 
     return candidates
