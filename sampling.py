@@ -4,16 +4,16 @@ import itertools
 
 def Sampling(corners, corner_type, ss_threshold = 5, width=300, height=300):
     """
-    :param corners: [batch_size, corner_id, coordinates(x,y,ss,ss)]
-    :param corner_type: [batch_size, corner_id, corner_type]
+    :param corners: [batch_size, num_corner, coordinates(x,y,ss,ss)]
+    :param corner_type: [batch_size, num_corner, corner_type]
                         corner_type => 1(top-left),4(bottom-left)
                                        3(bottom-right),2(top-right)
     :return: candidates: [batch_size, num_boxes, coordinates(8)]
     """
-    assert corners.size(0) == corner_type.size(0)
+    assert len(corners) == len(corner_type)
 
     candidates=[]
-    for i in range(corners.size(0)):
+    for i in range(len(corners)):
         corner_1 = []
         corner_2 = []
         corner_3 = []
@@ -22,7 +22,7 @@ def Sampling(corners, corner_type, ss_threshold = 5, width=300, height=300):
         pairs_2=[]
         pairs_3=[]
         pairs_4=[]
-        for corner_id in range(corners.size(1)):
+        for corner_id in range(len(corners[i])):
             if corner_type[i,corner_id,0] ==1:
                 corner_1.append(corners[i,corner_id])
             elif corner_type[i,corner_id,0] ==2:
