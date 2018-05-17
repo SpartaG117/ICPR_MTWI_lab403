@@ -21,8 +21,6 @@ def scoring(candidates, score_map, threshold=0.6):
     return final_boxes
 
 
-
-
 def roi_score(trans_bin, rotate_mat, score_map):
     num_pixel = 0
     score = 0
@@ -70,8 +68,6 @@ def generate_bin(box):
     :return:  bin: numpy.array[4,8], rect_bins: numpy.array[4,8]
     """
     bins = []
-    rec_bins = []
-
     x_l = (box[0] + box[2])/2
     y_l = (box[1] + box[3])/2
     x_t = (box[0] + box[6])/2
