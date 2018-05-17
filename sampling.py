@@ -6,8 +6,8 @@ def Sampling(corners, corner_type, ss_threshold = 5, width=300, height=300):
     """
     :param corners: [batch_size, corner_id, coordinates(x,y,ss,ss)]
     :param corner_type: [batch_size, corner_id, corner_type]
-                        corner_type => 1(top-left),2(bottom-left)
-                                       3(bottom-right),4(top-right)
+                        corner_type => 1(top-left),4(bottom-left)
+                                       3(bottom-right),2(top-right)
     :return: candidates: [batch_size, num_boxes, coordinates(8)]
     """
     assert corners.size(0) == corner_type.size(0)
@@ -35,16 +35,16 @@ def Sampling(corners, corner_type, ss_threshold = 5, width=300, height=300):
                 raise ValueError("The type of corner must be 1 or 2 or 3 or 4")
 
         # (top-left,top-right)
-        for pair in itertools.product(corner_1,corner_4):
+        for pair in itertools.product(corner_1,corner_2):
             pairs_1.append(pair)
         # (top-right, bottom-right)
-        for pair in itertools.product(corner_4,corner_3):
+        for pair in itertools.product(corner_2,corner_3):
             pairs_2.append(pair)
         # (bottom-left, bottom-right)
-        for pair in itertools.product(corner_2,corner_3):
+        for pair in itertools.product(corner_4,corner_3):
             pairs_3.append(pair)
         # (top-left, bottom-left)
-        for pair in itertools.product(corner_1,corner_2):
+        for pair in itertools.product(corner_1,corner_4):
             pairs_4.appned(pair)
 
         boxes=[]
