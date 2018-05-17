@@ -57,52 +57,74 @@ def build_score_offset_targets(default_boxes, gt_boxes, gt_corner_type_ids, conf
     return target_scores, target_offsets, match
 
 
-def build_seg_targets(zuobiao, config):
+def build_seg_targets(rects, config):
     """
-    这里希望输入的坐标是整数类型，连续的4个刚好代表了一个四边形，返回值是一个4*h*w的mask，0，1取值
+    rects [[y1, x1, y2, x2, y3, x3, y4, x4], [], [], []]
+    这里希望输入的坐标是整数类型，连续的个刚好代表了一个四边形，返回值是一个4*h*w的mask，0，1取值
     所以这部分有个关键函数，用来判断一个点是否在一个凸4边形内部
     """
-    target_segs = np.zeros(4, config.IMAGE_SHAPE[0], config.IMAGE_SHAPE[1])
-    assert len(zuobiao) % 4 == 0
-    num_boxes = int(len(zuobiao) / 4)
+    assert len(rects) > 0
+    num_rects = len(rects)
+    rects = torch.tensor(rects).float()
 
-    for x in range(config.IMAGE_SHAPE[0]):
-        for y in range(config.IMAGE_SHAPE[1]):
-            for i_box in range(num_boxes):
+    target_segs = torch.zeros((4, config.IMAGE_SHAPE[0], config.IMAGE_SHAPE[1]), requires_grad=False).long()
+
+    for y in range(config.IMAGE_SHAPE[0]):
+        for x in range(config.IMAGE_SHAPE[1]):
+            for i_rect in range(num_rects):
                 # 得到四个点的坐标
-                convex_quadrilateral_points = torch.FloatTensor([zuobiao[i_box * 4:(i_box + 1) * 4]])
+                a = rects[i_rect, 0:2]
+                b = rects[i_rect, 2:4]
+                c = rects[i_rect, 4:6]
+                d = rects[i_rect, 6:8]
+
                 # 把这四个点进行切分，得到中心坐标，即把这个多半行划分为4份
-                a, b, c, d = convex_quadrilateral_points[0:4]
                 mid_ab = (a + b) / 2
                 mid_bc = (b + c) / 2
                 mid_cd = (c + d) / 2
                 mid_da = (d + a) / 2
-                # mid_convex_quadrilateral = (mid_bc + mid_da) / 2
-                mid_convex_quadrilateral = (mid_ab + mid_cd) / 2
+                # mid_rect = (mid_bc + mid_da) / 2
+                mid_rect = (mid_ab + mid_cd) / 2
 
-                part_top_left = torch.stack([a, mid_ab, mid_convex_quadrilateral, mid_da], dim=0)
-                part_top_right = torch.stack([mid_ab, b, mid_bc, mid_convex_quadrilateral], dim=0)
-                part_bottom_right = torch.stack([mid_convex_quadrilateral, mid_bc, c, mid_cd], dim=0)
-                part_bottom_left = torch.stack([mid_da, mid_convex_quadrilateral, mid_cd, d], dim=0)
-                point = torch.FloatTensor([x, y])
+                part_top_left = torch.stack((a, mid_ab, mid_rect, mid_da), dim=0)
+                part_top_right = torch.stack((mid_ab, b, mid_bc, mid_rect), dim=0)
+                part_bottom_right = torch.stack((mid_rect, mid_bc, c, mid_cd), dim=0)
+                part_bottom_left = torch.stack((mid_da, mid_rect, mid_cd, d), dim=0)
+                point = torch.tensor([y, x]).float()
 
                 parts = [part_top_left, part_top_right, part_bottom_right, part_bottom_left]
                 for j_part in range(len(parts)):
-                    if (is_in_convex_quadrilateral(parts[j_part], point)):
-                        target_segs[j_part, x, y] = 1
+                    if is_in_convex_quad(parts[j_part], point):
+                        target_segs[j_part, y, x] = 1
         return target_segs.long()
 
 
-def is_in_convex_quadrilateral(convex_quadrilateral_points, point):
+def is_in_convex_quad(convex_quad_points, point):
     """
     用来判断一个点是否在凸四边形内部，仅仅只内部，不包括边界上的点，如过在内部，返回true,不在内部，则返回false
     convex_quadrilateral_points是一个4*2的floattensor
     point是一个2大小的tensor
+    注意这里的输入坐标是是[y1, x1], [y2, x2], [y3, x3]的形式，y在前面
     """
     # 先得到凸四边形的四个顶点, 这里的定点是在图像域中的坐标
-    assert convex_quadrilateral_points.size()[0] == 4
-    a, b, c, d = convex_quadrilateral_points[0:4]
-    x = point
+    assert convex_quad_points.size()[0] == 4
+
+    def swap(point_yx):
+        """
+        交换x坐标和y坐标
+        :param point_yx  floattensor, 不需要梯度:
+        :return: floattensor, 不需要梯度
+        """
+        xy_point = torch.zeros(2, requires_grad=False).float()
+        xy_point[0] = point_yx[1]
+        xy_point[1] = point_yx[0]
+        return xy_point
+
+    a = swap(convex_quad_points[0])
+    b = swap(convex_quad_points[1])
+    c = swap(convex_quad_points[2])
+    d = swap(convex_quad_points[3])
+    x = swap(point)
 
     # 计算我们需要的一些向量
     ab = b - a
@@ -115,14 +137,19 @@ def is_in_convex_quadrilateral(convex_quadrilateral_points, point):
     dx = x - d
 
     return ((ab[0] * ax[1] - ax[0] * ab[1]) > 0) and ((bc[0] * bx[1] - bx[0] * bc[1]) > 0) \
-           and ((cd[0] * cx[1] - cx[0] * cd[1]) > 0) and ((da[0] * dx[1] - dx[0] * da[1]) > 0)
+        and ((cd[0] * cx[1] - cx[0] * cd[1]) > 0) and ((da[0] * dx[1] - dx[0] * da[1]) > 0)
 
 
 def compute_overlaps(boxes1, boxes2):
     """
-    两个输入都是tensor，boxes1: shape [N1 ,4],  boxes2: shape [N2 ,4],
+    两个输入都是 floattensor，不需要梯度， boxes1: shape [N1 ,4],  boxes2: shape [N2 ,4],
     这里输入的坐标是在图像域里面的
+
+    返回值: overlaps floattensor, 不需要梯度， shape [N1, N2]
     """
+    assert isinstance(boxes1, torch.FloatTensor)
+    assert isinstance(boxes2, torch.FloatTensor)
+
     y1 = boxes1[:, 0]
     x1 = boxes1[:, 1]
     y2 = boxes1[:, 2]
@@ -130,7 +157,7 @@ def compute_overlaps(boxes1, boxes2):
     h = y2 - y1 + 1
     w = x2 - x1 + 1
     area = h * w
-    overlaps = torch.zeros(boxes1.size()[0], boxes2.size()[0])
+    overlaps = torch.zeros((boxes1.size()[0], boxes2.size()[0]), requires_grad=False).float()
 
     for i in range(boxes2.size()[0]):
         # 计算某个boxes2与boxes1中所有box的交集
@@ -146,9 +173,15 @@ def compute_overlaps(boxes1, boxes2):
 
 def compute_offsets(box, gt_box):
     """
-    这里的两个输入都是一个box, tensor, shape [4]
+    这里的两个输入都是一个box, floattensor, 不要梯度， shape [4]
+    返回值: offsets floattensor, 不需要梯度， shape [4]
     """
-    offsets = torch.zeros(4)
+    assert len(box.size()) == 1 and len(gt_box.size()) == 1
+    assert box.size()[0] == 4 and gt_box.size()[0] == 4
+    assert isinstance(box, torch.FloatTensor)
+    assert isinstance(gt_box, torch.FloatTensor)
+
+    offsets = torch.zeros(4, requires_grad=False).float()
     box_y_ctr, box_x_ctr, box_h, box_w = get_ctrs_h_w(box)
     gt_box_y_ctr, gt_box_x_ctr, gt_box_h, gt_box_w = get_ctrs_h_w(gt_box)
 
