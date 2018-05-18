@@ -41,6 +41,8 @@ def generate_default_boxes(config):
 
     default_boxes = []
 
+    print('Begin to generate default boxes')
+
     for i in range(2, 9):
         feature_stride = 2 ** i
         feature_height = image_shape[0] // feature_stride
@@ -49,5 +51,6 @@ def generate_default_boxes(config):
         feature_boxes = generate_feature_boxes(feature_shape, feature_stride, all_scales[i - 2])
         default_boxes.extend(feature_boxes)
 
-    return default_boxes
+    print('{:d} default boxes have been generated'.format(len(default_boxes)))
 
+    return default_boxes
