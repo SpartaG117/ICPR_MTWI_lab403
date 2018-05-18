@@ -12,25 +12,29 @@ import cv2
 from sure_generate_boxes import generate_default_boxes
 from build_targets import build_score_offset_targets, build_seg_targets
 
+# todo 需要更准确的判断矩形的方法
+# todo build_targets中的compute_overlaps还需要检查检查过
+
 
 class IcprDataset(Dataset):
-    def __init__(self, root_dir, config, phase='train', image_transform=None, desired_image_shape=(512, 512)):
+    def __init__(self, root_dir, config, phase='train', image_transform=None):
         self.root_dir = root_dir
         self.config = config
         self.phase = phase
         self.image_transform = image_transform
-        assert len(desired_image_shape) == 2
-        self.desired_img_height = desired_image_shape[0]
-        self.desired_img_width = desired_image_shape[1]
 
-        self.default_boxes = torch.from_numpy(np.array(generate_default_boxes(self.config))).float()
+        assert len(config.IMAGE_SHAPE) == 2
+        self.desired_img_height = config.IMAGE_SHAPE[0]
+        self.desired_img_width = config.IMAGE_SHAPE[1]
+
+        self.default_boxes = torch.tensor(generate_default_boxes(self.config)).float()
 
         img_dir = 'image_' + self.phase
         txt_dir = 'txt_' + self.phase
         img_dir = os.path.join(self.root_dir, img_dir)
         txt_dir = os.path.join(self.root_dir, txt_dir)
-        assert os.path.exists(txt_dir)
         assert os.path.exists(img_dir)
+        assert os.path.exists(txt_dir)
 
         self.img_dir = img_dir
         self.txt_dir = txt_dir
@@ -52,24 +56,28 @@ class IcprDataset(Dataset):
         hscale = self.desired_img_height / img_height
         wscale = self.desired_img_width / img_width
 
-        # 读取信息
+        # 读取文本信息
         with open(txt_path, 'rb') as f:
             lines = f.readlines()
 
         # [[x1, y1, x2, y2, x3, y3, x4, y4], [], [], []] 这样形式的列表
+        # 这里的坐标是浮点数
         # 注意这里的数据集有问题
         quads = []
         for line in lines:
+            # 不要最后一位的文字信息
             line = line.decode('utf-8').split(',')[:-1]
             quads.append([float(coord) for coord in line])
 
         # 需要注意的是，minAreaRect的输入必须是int型
+        # 这部分是得到文本框矩形，按顺序排列好的，坐标为浮点数，而且与resize相对应
+        # todo 这部分可以进一步排除一些效果很差的文本框
         rects= []
         for quad in quads:
             cnt = np.round(np.reshape(np.array(quad), (4, 2))).astype(np.int)
             rect = cv2.minAreaRect(cnt)
             rect_points = cv2.boxPoints(rect)
-            # todo 这里需要对points的顺序做个调整
+            # 这里需要对points的顺序做个调整
             # 这里的矩阵需要满足一定的定义 x2 > x1, x3 > x4, y3 > y2, y4 > y1
             j = 0
             while not is_correct_rect(rect_points):
@@ -77,12 +85,11 @@ class IcprDataset(Dataset):
                 j += 1
                 # 如果j==4,说明绕了一圈了，说明这个点的坐标是存在问题的
                 if j == 4:
-                    print(rect_points)
                     break
 
             # j == 4说明这个矩阵是有问题的，我们需要把它删除掉，可以简单利用面积先确定下,10是随便确定的
             if j == 4:
-                assert compute_area(rect_points) < 10
+                # assert compute_area(rect_points) < 50
                 continue
 
             # 再次确定下是正确的矩形
@@ -91,6 +98,7 @@ class IcprDataset(Dataset):
             # 把np.array的坐标[[x1, y1], [x2, y2], [x3, y3], [x4, y4]]转换成我们需要的格式
             # [y1, x1, y2, x2, y3, x3, y4, x4]
             # 原来的坐标是整数类型，现在转换成浮点数
+            # 注意的是我们对图片进行了resize操作，所以这里相应的要乘以系数
             temp = [rect_points[0, 1] * hscale, rect_points[0, 0] * wscale,
                     rect_points[1, 1] * hscale, rect_points[1, 0] * wscale,
                     rect_points[2, 1] * hscale, rect_points[2, 0] * wscale,
@@ -114,7 +122,6 @@ class IcprDataset(Dataset):
         gt_boxes = torch.zeros((len(rects) * 4, 4), requires_grad=False).float()
         gt_corner_type_ids = torch.zeros(len(rects) * 4, requires_grad=False).long()
 
-        #
         for i, rect in enumerate(rects):
             ss1 = math.sqrt(math.pow(rect[1] - rect[3], 2) + math.pow(rect[0] - rect[2], 2))
             ss2 = math.sqrt(math.pow(rect[3] - rect[5], 2) + math.pow(rect[2] - rect[4], 2))
@@ -127,7 +134,6 @@ class IcprDataset(Dataset):
                 gt_boxes[i*4+j][3] = rect[j*2 + 1] + 0.5 * (ss - 1)
                 gt_corner_type_ids[i*4+j] = j+1
 
-        print(self.default_boxes.type())
         target_scores, target_offsets, match = \
             build_score_offset_targets(self.default_boxes, gt_boxes, gt_corner_type_ids, self.config)
         target_segs = build_seg_targets(rects, self.config)
@@ -137,8 +143,6 @@ class IcprDataset(Dataset):
 
         return {'image': img, 'target_scores': target_scores, 'target_offsets': target_offsets,
                 'target_segs': target_segs, 'match': match}
-
-        # return {'image': img, 'target_scores': target_scores, 'target_offsets': target_offsets, 'match': match}
 
     def __len__(self):
         return len(self.img_list)
@@ -152,8 +156,8 @@ def detection_collate(batch):
     match = []
 
     for sample in batch:
-        print(sample.keys())
-        images.append(sample['image'])
+        # print(sample.keys())
+        images.append((sample['image']))
         target_scores.append(sample['target_scores'])
         target_offsets.append(sample['target_offsets'])
         target_segs.append(sample['target_segs'])
@@ -161,15 +165,27 @@ def detection_collate(batch):
 
     #         torch.stack(target_segs, dim=0)
     return torch.stack(images, dim=0), torch.stack(target_scores, dim=0), torch.stack(target_offsets, dim=0), \
-           torch.stack(target_segs, dim=0), torch.stack(match, dim=0)
+        torch.stack(target_segs, dim=0), torch.stack(match, dim=0)
 
+
+# def is_correct_rect(rect):
+#     """
+#     :param rect_points: np.array shape [4, 2] [x1, y1], [x2, y2]
+#     :return:
+#     """
+#     return rect[1, 0] > rect[0, 0] and rect[2, 0] > rect[3, 0] and rect[2, 1] > rect[1, 1] and rect[3, 1] > rect[0, 1]
 
 def is_correct_rect(rect):
     """
     :param rect_points: np.array shape [4, 2] [x1, y1], [x2, y2]
     :return:
     """
-    return rect[1, 0] > rect[0, 0] and rect[2, 0] > rect[3, 0] and rect[2, 1] > rect[1, 1] and rect[3, 1] > rect[0, 1]
+    area = compute_area(rect)
+    # 这个10是超参数
+    offset = math.sqrt(area) / 8
+
+    return rect[1, 0] > (rect[0, 0] + offset) and rect[2, 0] > (rect[3, 0] + offset) \
+        and rect[2, 1] > (rect[1, 1] + offset) and rect[3, 1] > (rect[0, 1] + offset)
 
 
 def shift_rect_points(rect):
@@ -191,7 +207,7 @@ class Config():
     def __init__(self):
         self.IMAGE_SHAPE = (512, 512) # desired height and width
         self.NUM_CORNER_TYPES = 4 # top left, top right, bottom right, bottom left
-        self.IOU_THRESHOLD = 0.7 # 在build match中使用
+        self.IOU_THRESHOLD_FOR_DEFAULT_AND_GT_BOX = 0.7 # 在build match中使用
         self.CORNER_TYPE_IDS = (1, 2, 3, 4) # label for top left, top right, bottom right, bottom left
         self.ALL_SCALES = ((4, 8, 6, 10, 12, 16), (20, 24, 28, 32), (36, 40, 44, 48), (56, 64, 72, 80),
                            (88, 96, 104, 112), (124, 136, 148, 160), (184, 208, 232, 256))
@@ -206,14 +222,36 @@ if __name__ =='__main__':
     # data = dataset[0]
     # print(data['truth'])
     dataloader = DataLoader(dataset,
-                            batch_size=1,
+                            batch_size=4,
                             shuffle=True,
-                            num_workers=1,
+                            num_workers=8,
                             collate_fn=detection_collate)
     print(len(dataloader))
     for i,batch in enumerate(dataloader):
-        if i == 1:
+        if i == 3:
             break
+        print(i)
         imgs, target_scores, target_offsets, target_segs, match = batch
-        print(imgs.size(), target_scores.size(), target_offsets.size(), target_segs.size(), match.size())
-        
+        print(target_scores.size(), target_offsets.size(), target_segs.size(), match.size())
+    # image = (imgs.squeeze(dim=0) * 255).permute(1, 2, 0).int().numpy().astype(np.uint8)
+    # image_test = np.zeros((512, 512, 3), dtype=np.uint8)
+    # image_test[:, :, 0] = image[:, :, 2]
+    # image_test[:, :, 1] = image[:, :, 1]
+    # image_test[:, :, 2] = image[:, :, 0]
+    # print(image.shape)
+    # print(image.dtype)
+    # cv2.imshow('image', image_test)
+    # print(torch.unique(target_scores))
+    # print(torch.unique(match))
+    # print(torch.unique(target_segs))
+    #
+    # mask1 = (target_segs[0, 0, :, :]).numpy().astype(np.uint8) * 255
+    # mask2 = (target_segs[0, 1, :, :]).numpy().astype(np.uint8) * 255
+    # mask3 = (target_segs[0, 2, :, :]).numpy().astype(np.uint8) * 255
+    # mask4 = (target_segs[0, 3, :, :]).numpy().astype(np.uint8) * 255
+    # cv2.imshow('mask1', mask1)
+    # cv2.imshow('mask2', mask2)
+    # cv2.imshow('mask3', mask3)
+    # cv2.imshow('mask4', mask4)
+    # cv2.waitKey()
+
